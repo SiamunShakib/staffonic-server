@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const app = express();
-const port = process.env.PORT || 5000 ;
+const port = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
@@ -20,17 +20,14 @@ const client = new MongoClient(uri, {
 
 async function startServer() {
   try {
-    // Connect the client first
     await client.connect();
     console.log("Connected to MongoDB");
 
     const userCollection = client.db('staffonic-admin').collection('user');
     const workRecordsCollection = client.db('staffonic-admin').collection('workRecords');
-   const paymentsCollection = client.db("staffonic-admin").collection("payments");
+    const paymentsCollection = client.db("staffonic-admin").collection("payments");
 
-
-
-    // user apis
+    // ----------------- USER APIS -----------------
     app.get('/users', async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -42,9 +39,54 @@ async function startServer() {
       res.send({ insertedId: result.insertedId });
     });
 
+    app.patch("/users/:id/verify", async (req, res) => {
+      const id = req.params.id;
+      const user = await userCollection.findOne({ _id: new ObjectId(id) });
+      if (!user) return res.status(404).send({ error: "User not found" });
 
-    // works records apis
-        app.get('/workRecords', async (req, res) => {
+      const newStatus = !user?.isVerified;
+      const result = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { isVerified: newStatus } }
+      );
+      res.send({ modifiedCount: result.modifiedCount, isVerified: newStatus });
+    });
+
+    app.patch("/users/:id/fire", async (req, res) => {
+      const id = req.params.id;
+      const result = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { fired: true } }
+      );
+      res.send({ modifiedCount: result.modifiedCount });
+    });
+
+    // Toggle HR <-> Employee
+    app.patch("/users/:id/toggleRole", async (req, res) => {
+      const id = req.params.id;
+      const user = await userCollection.findOne({ _id: new ObjectId(id) });
+      if (!user) return res.status(404).send({ error: "User not found" });
+
+      const newRole = user.role === "hr" ? "employee" : "hr";
+      const result = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role: newRole } }
+      );
+      res.send({ modifiedCount: result.modifiedCount, role: newRole });
+    });
+
+    app.patch("/users/:id/salary", async (req, res) => {
+      const id = req.params.id;
+      const { salary } = req.body;
+      const result = await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { salary } }
+      );
+      res.send({ modifiedCount: result.modifiedCount });
+    });
+
+    // ----------------- WORK RECORDS APIS -----------------
+    app.get('/workRecords', async (req, res) => {
       const email = req.query.email;
       if (!email) return res.status(400).send({ error: "Email query is required" });
       const records = await workRecordsCollection.find({ email }).toArray();
@@ -57,7 +99,7 @@ async function startServer() {
       res.send({ insertedId: result.insertedId });
     });
 
-      app.delete('/workRecords/:id', async (req, res) => {
+    app.delete('/workRecords/:id', async (req, res) => {
       const id = req.params.id;
       const result = await workRecordsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
@@ -66,7 +108,7 @@ async function startServer() {
     app.put('/workRecords/:id', async (req, res) => {
       const id = req.params.id;
       const updatedWork = req.body;
-      const {_id, ...dataToUpdate} = updatedWork;
+      const { _id, ...dataToUpdate } = updatedWork;
       const result = await workRecordsCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: dataToUpdate }
@@ -74,53 +116,30 @@ async function startServer() {
       res.send(result);
     });
 
-
-    // Toggle employee verification
-    app.patch("/users/:id/verify", async (req, res) => {
-      const id = req.params.id;
-      const user = await userCollection.findOne({ _id: new ObjectId(id) });
-      const newStatus = !user?.isVerified; // toggle
-
-      const result = await userCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { isVerified: newStatus } }
-      );
-      res.send({ modifiedCount: result.modifiedCount, isVerified: newStatus });
-    });
-
-
-    // payment apis
-      app.post("/payments", async (req, res) => {
-      const payment = req.body; // {userId, salary, month, year, status}
-      payment.status = "pending"; // default
+    // ----------------- PAYMENT APIS -----------------
+    app.post("/payments", async (req, res) => {
+      const payment = req.body;
+      payment.status = "pending";
       const result = await paymentsCollection.insertOne(payment);
       res.send({ insertedId: result.insertedId });
     });
 
-    // get payments (for payroll/admin)
     app.get("/payments", async (req, res) => {
       const payments = await paymentsCollection.find().toArray();
       res.send(payments);
     });
 
-
-    // Get payment history for specific employee
-    app.get("/payments/:email", async (req, res) => {
+    // Employee payment history (fixed route to avoid conflict)
+    app.get("/payments/history/:email", async (req, res) => {
       const email = req.params.email;
       const payments = await paymentsCollection
         .find({ email })
-        .sort({ year: 1, month: 1 }) // earliest first
+        .sort({ year: 1, month: 1 })
         .toArray();
       res.send(payments);
     });
 
-
-
-
-
-
-    
-    // root
+    // ----------------- ROOT -----------------
     app.get('/', (req, res) => {
       res.send('staffonic is running');
     });
